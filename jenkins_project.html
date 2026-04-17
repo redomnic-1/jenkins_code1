@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Duck Hunt</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a2e; display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: sans-serif; }
+  #game-wrap { position: relative; width: 700px; height: 480px; background: #87CEEB; overflow: hidden; border-radius: 12px; cursor: crosshair; user-select: none; }
+  #ground { position: absolute; bottom: 0; left: 0; right: 0; height: 90px; background: #4a7c3f; border-top: 4px solid #2d5a22; }
+  #grass-top { position: absolute; bottom: 86px; left: 0; right: 0; height: 18px; background: #5a9e4a; clip-path: polygon(0% 80%, 2% 0%, 4% 80%, 6% 10%, 8% 80%, 10% 5%, 12% 80%, 14% 20%, 16% 80%, 18% 0%, 20% 80%, 22% 15%, 24% 80%, 26% 5%, 28% 80%, 30% 10%, 32% 80%, 34% 0%, 36% 80%, 38% 15%, 40% 80%, 42% 5%, 44% 80%, 46% 10%, 48% 80%, 50% 0%, 52% 80%, 54% 15%, 56% 80%, 58% 5%, 60% 80%, 62% 10%, 64% 80%, 66% 0%, 68% 80%, 70% 20%, 72% 80%, 74% 5%, 76% 80%, 78% 10%, 80% 80%, 82% 0%, 84% 80%, 86% 15%, 88% 80%, 90% 5%, 92% 80%, 94% 10%, 96% 80%, 98% 0%, 100% 80%, 100% 100%, 0% 100%); }
+  .cloud { position: absolute; background: white; border-radius: 50px; opacity: 0.85; }
+  #hud { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+  .hud-box { background: rgba(0,0,0,0.35); color: white; padding: 6px 14px; border-radius: 20px; font-size: 14px; font-weight: 500; }
+  .duck { position: absolute; width: 52px; height: 40px; cursor: crosshair; }
+  #shot-flash { position: absolute; inset: 0; background: white; opacity: 0; pointer-events: none; border-radius: 12px; transition: opacity 0.05s; }
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); border-radius: 12px; }
+  #overlay h2 { color: white; font-size: 28px; font-weight: 500; margin: 0 0 8px; }
+  #overlay p { color: rgba(255,255,255,0.8); font-size: 15px; margin: 0 0 20px; }
+  #start-btn { background: #e8c84a; border: none; color: #2c1e00; font-size: 15px; font-weight: 500; padding: 10px 28px; border-radius: 24px; cursor: pointer; }
+  #start-btn:hover { background: #f0d660; }
+  .hit-text { position: absolute; font-size: 18px; font-weight: 500; color: #ff4444; pointer-events: none; animation: hitfade 0.6s forwards; }
+  @keyframes hitfade { 0%{opacity:1;transform:translateY(0)} 100%{opacity:0;transform:translateY(-40px)} }
+  .feather { position: absolute; font-size: 20px; pointer-events: none; animation: featherfall 0.8s forwards; }
+  @keyframes featherfall { 0%{opacity:1;transform:translateY(0) rotate(0deg)} 100%{opacity:0;transform:translateY(50px) rotate(180deg)} }
+  #ammo { display: flex; gap: 5px; }
+  .bullet { width: 10px; height: 16px; background: #e8c84a; border-radius: 3px 3px 1px 1px; }
+  .bullet.empty { background: rgba(255,255,255,0.25); }
+  @keyframes cloudmove { from{transform:translateX(0)} to{transform:translateX(-800px)} }
+</style>
+</head>
+<body>
+<div id="game-wrap">
+  <div class="cloud" style="width:90px;height:30px;top:40px;left:10%;animation:cloudmove 18s linear infinite"></div>
+  <div class="cloud" style="width:130px;height:38px;top:60px;left:45%;animation:cloudmove 25s linear infinite"></div>
+  <div class="cloud" style="width:70px;height:24px;top:28px;left:70%;animation:cloudmove 20s linear infinite"></div>
+  <div id="ground"></div>
+  <div id="grass-top"></div>
+  <div id="shot-flash"></div>
+  <div id="hud">
+    <div class="hud-box">Score: <span id="score-val">0</span></div>
+    <div class="hud-box">Wave <span id="wave-val">1</span></div>
+    <div id="ammo"></div>
+    <div class="hud-box">Misses: <span id="misses-val">0</span> / 3</div>
+  </div>
+  <div id="overlay">
+    <h2>Duck Hunt</h2>
+    <p>Click the ducks before they escape!</p>
+    <button id="start-btn" onclick="startGame()">Start Game</button>
+  </div>
+</div>
+
+<script>
+const wrap = document.getElementById('game-wrap');
+const overlay = document.getElementById('overlay');
+const scoreEl = document.getElementById('score-val');
+const waveEl = document.getElementById('wave-val');
+const missesEl = document.getElementById('misses-val');
+const ammoEl = document.getElementById('ammo');
+const flash = document.getElementById('shot-flash');
+
+let ducks = [], score = 0, misses = 0, wave = 1, ammo = 5, running = false, spawnTimer;
+
+const DUCK_COLORS = ['#4a90d9','#e07020','#2db06a','#cc3366','#8844cc'];
+
+function duckSVG(color) {
+  return `<svg viewBox="0 0 52 40" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="26" cy="25" rx="18" ry="11" fill="${color}"/>
+    <circle cx="38" cy="16" r="9" fill="${color}"/>
+    <ellipse cx="44" cy="17" rx="7" ry="4" fill="#f0a020"/>
+    <circle cx="40" cy="14" r="2" fill="#111"/>
+    <circle cx="40.6" cy="13.4" r="0.7" fill="white"/>
+    <polygon points="14,24 4,20 12,28" fill="${color}"/>
+    <polygon points="14,26 2,26 12,30" fill="${color}"/>
+  </svg>`;
+}
+
+function buildAmmo() {
+  ammoEl.innerHTML = '';
+  for (let i = 0; i < 5; i++) {
+    const b = document.createElement('div');
+    b.className = 'bullet' + (i >= ammo ? ' empty' : '');
+    ammoEl.appendChild(b);
+  }
+}
+
+function spawnDuck() {
+  if (!running) return;
+  const el = document.createElement('div');
+  el.className = 'duck';
+  const color = DUCK_COLORS[Math.floor(Math.random() * DUCK_COLORS.length)];
+  el.innerHTML = duckSVG(color);
+
+  const goRight = Math.random() > 0.5;
+  const yMin = 60, yMax = wrap.offsetHeight - 140;
+  let y = yMin + Math.random() * (yMax - yMin);
+  let x = goRight ? -60 : wrap.offsetWidth + 10;
+  const speed = 1.2 + wave * 0.25 + Math.random() * 0.8;
+  let vy = (Math.random() - 0.5) * 1.2;
+
+  el.style.cssText = `left:${x}px;top:${y}px;position:absolute;width:52px;height:40px;cursor:crosshair;${goRight ? '' : 'transform:scaleX(-1)'}`;
+
+  el.addEventListener('click', (e) => {
+    if (!running) return;
+    e.stopPropagation();
+    hitDuck(el);
+  });
+
+  wrap.appendChild(el);
+  ducks.push({ el, x, y, speed, vy, goRight, alive: true, escaped: false });
+}
+
+function hitDuck(el) {
+  const duck = ducks.find(d => d.el === el);
+  if (!duck || !duck.alive) return;
+  duck.alive = false;
+  score += 10 * wave;
+  scoreEl.textContent = score;
+
+  for (let i = 0; i < 4; i++) {
+    const f = document.createElement('div');
+    f.className = 'feather';
+    f.textContent = '~';
+    f.style.cssText = `left:${duck.x + (Math.random() - 0.5) * 30}px;top:${duck.y}px;color:#aaa`;
+    wrap.appendChild(f);
+    setTimeout(() => f.remove(), 900);
+  }
+
+  const ht = document.createElement('div');
+  ht.className = 'hit-text';
+  ht.textContent = '+' + 10 * wave;
+  ht.style.cssText = `left:${duck.x + 10}px;top:${duck.y - 10}px`;
+  wrap.appendChild(ht);
+  setTimeout(() => ht.remove(), 700);
+
+  el.style.transition = 'top 0.5s, opacity 0.5s';
+  el.style.top = (duck.y + 60) + 'px';
+  el.style.opacity = '0';
+  setTimeout(() => el.remove(), 600);
+}
+
+function gameLoop() {
+  if (!running) return;
+  ducks = ducks.filter(d => d.alive || !d.escaped);
+
+  for (const d of ducks) {
+    if (!d.alive) continue;
+    d.x += d.goRight ? d.speed : -d.speed;
+    d.y += d.vy;
+    if (d.y < 50) d.vy = Math.abs(d.vy);
+    if (d.y > wrap.offsetHeight - 130) d.vy = -Math.abs(d.vy);
+    d.el.style.left = d.x + 'px';
+    d.el.style.top = d.y + 'px';
+
+    if ((d.goRight && d.x > wrap.offsetWidth + 10) || (!d.goRight && d.x < -70)) {
+      d.alive = false;
+      d.escaped = true;
+      d.el.remove();
+      misses++;
+      missesEl.textContent = misses;
+      if (misses >= 3) { endGame(); return; }
+    }
+  }
+  requestAnimationFrame(gameLoop);
+}
+
+function startGame() {
+  score = 0; misses = 0; wave = 1; ammo = 5; running = true;
+  scoreEl.textContent = 0; waveEl.textContent = 1; missesEl.textContent = 0;
+  buildAmmo();
+  overlay.style.display = 'none';
+  ducks.forEach(d => { try { d.el.remove(); } catch (e) {} });
+  ducks = [];
+  startWave();
+  gameLoop();
+}
+
+function startWave() {
+  const count = 3 + wave;
+  let spawned = 0;
+  clearInterval(spawnTimer);
+  const interval = Math.max(600, 1400 - wave * 120);
+  spawnTimer = setInterval(() => {
+    if (!running) { clearInterval(spawnTimer); return; }
+    spawnDuck();
+    spawned++;
+    if (spawned >= count) clearInterval(spawnTimer);
+  }, interval);
+
+  const waveEnd = interval * count + 3000;
+  setTimeout(() => {
+    if (!running) return;
+    const alive = ducks.filter(d => d.alive).length;
+    if (alive === 0) {
+      wave++;
+      waveEl.textContent = wave;
+      ammo = 5;
+      buildAmmo();
+      startWave();
+    }
+  }, waveEnd);
+}
+
+wrap.addEventListener('click', (e) => {
+  if (!running) return;
+  if (e.target.closest('.duck')) return;
+  if (ammo <= 0) return;
+  ammo--;
+  buildAmmo();
+  flash.style.opacity = '0.3';
+  setTimeout(() => flash.style.opacity = '0', 80);
+  if (ammo === 0) {
+    setTimeout(() => {
+      if (!running) return;
+      const alive = ducks.filter(d => d.alive).length;
+      if (alive > 0) { misses += alive; missesEl.textContent = misses; }
+      if (misses >= 3) { endGame(); return; }
+      ammo = 5;
+      buildAmmo();
+    }, 800);
+  }
+});
+
+function endGame() {
+  running = false;
+  clearInterval(spawnTimer);
+  ducks.forEach(d => { try { d.el.remove(); } catch (e) {} });
+  ducks = [];
+  overlay.style.display = 'flex';
+  overlay.innerHTML = `
+    <h2>Game Over!</h2>
+    <p>Final Score: <strong>${score}</strong> &nbsp;|&nbsp; Wave ${wave}</p>
+    <button id="start-btn" onclick="startGame()" style="background:#e8c84a;border:none;color:#2c1e00;font-size:15px;font-weight:500;padding:10px 28px;border-radius:24px;cursor:pointer;">Play Again</button>
+  `;
+}
+
+buildAmmo();
+</script>
+</body>
+</html>
